@@ -11,6 +11,11 @@ pub struct TinyPair{
 pub struct TinySet{
     pairs: Vec<TinyPair>
 }
+pub struct TinyMNIST{
+    pub training: TinySet,
+    pub validation: TinySet,
+    pub test: TinySet
+}
 
 impl TinySet{
     fn initialize(images: Vec<u8>, labels: Vec<u8>) -> Self{
@@ -35,12 +40,6 @@ impl TinySet{
     pub fn get_n_random_pairs(&self, n: usize) -> Vec<TinyPair> {
         self.pairs.choose_multiple(&mut rand::thread_rng(), n).cloned().collect()
     }
-}
-
-pub struct TinyMNIST{
-    pub training: TinySet,
-    pub validation: TinySet,
-    pub test: TinySet
 }
 
 impl TinyMNIST{

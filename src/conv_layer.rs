@@ -1,5 +1,5 @@
 use rand::Rng;
-use rulinalg::matrix::{Matrix};
+use rulinalg::matrix::{Matrix, BaseMatrix};
 
 struct KernelVec {
     //as many subkernels as the input has channels
@@ -43,4 +43,33 @@ pub fn gen_rand_matrix(rows: usize, cols: usize) -> Matrix<f32> {
     let data: Vec<f32> = (0..rows*cols).map(|_| rand::thread_rng().gen_range(-1.0..1.0)).collect();
     //returns 2d matrix
     Matrix::new(rows, cols, data)
+}
+
+fn get_flipped_matrix_180(matrix: &Matrix<f32>) -> Matrix<f32> {
+    let mut newmatrix = matrix.clone();
+    newmatrix.mut_data().reverse();
+    newmatrix
+}
+
+pub fn convolve(image: &Matrix<f32>, kernel: &Matrix<f32>) -> Matrix<f32> {
+    let kernel_size = kernel.rows();
+    let mut row_slide = 0;
+    let mut col_slide = 0;
+
+    let flipped_kernel = get_flipped_matrix_180(kernel);
+    let mut featuredata: Vec<f32> = Vec::new();
+    //use sub_slice to cut out the part of the image that is under the kernel
+    while row_slide <= image.rows() - kernel_size {
+        while col_slide <= image.cols() - kernel_size {
+            let under_kernel_image = image.sub_slice([row_slide, col_slide], kernel_size, kernel_size).into_matrix();
+            //this multiplies the kernel with the underlying image elementwise, then sums up the result
+            let feature = under_kernel_image.elemul(&flipped_kernel).sum();
+            featuredata.push(feature);
+            col_slide += 1;
+        }
+        col_slide = 0;
+        row_slide += 1;
+    }
+    //convert featuredata to matrix
+    Matrix::new(image.rows() - kernel_size + 1, image.cols() - kernel_size + 1, featuredata)
 }
