@@ -1,66 +1,60 @@
-use mnist::{Mnist, MnistBuilder};
-use rulinalg::matrix::{BaseMatrix, Matrix};
+use mnist::{MnistBuilder};
+use rand::seq::SliceRandom;
+use rulinalg::matrix::{Matrix};
 use crate::settings;
-pub struct Set{
-    img: Matrix<f32>,
-    lbl: Matrix<u8>,
+
+#[derive(Clone)]
+pub struct TinyPair{
+    pub img: Matrix<f32>,
+    pub lbl: u8
+}
+pub struct TinySet{
+    pairs: Vec<TinyPair>
 }
 
-impl Set{
-    //this function uses the select_rows function, which needs a vec containing all the rows indices
-    //that's why the row_indexes range thingy is a little funny looking
-    pub fn get_img_lbl_pair(&self, idx: usize) -> (Matrix<f32>, Matrix<u8>){
-        let row_indexes = (28*idx..28*(idx+1)).collect::<Vec<_>>();
-        let fragment_img: Matrix<f32> = self.img.select_rows(&row_indexes);
+impl TinySet{
+    fn initialize(images: Vec<u8>, labels: Vec<u8>) -> Self{
+        let pixels_per_image = 28*28;
+        let newimages: Vec<f32> = images.iter().map(|i| *i as f32 / 255.0).collect();
+        let mut count = 0;
+        let mut pairs: Vec<TinyPair> = Vec::new();
+        //return empty vec if the set has length = 0
+        if images.len() == 0 { return TinySet { pairs }};
+        
+        while count < newimages.len() {
+            let matrixdata: Vec<f32> = newimages[count..(count + pixels_per_image)].to_vec();
+            pairs.push(TinyPair{
+                img: Matrix::new(28, 28, matrixdata),
+                lbl: labels[count/pixels_per_image]
+            });
+            count += pixels_per_image;
+        }
+        TinySet { pairs }
+    }
 
-        let row_indexes = (10*idx..10*(idx+1)).collect::<Vec<_>>();
-        let fragment_lbl: Matrix<u8> = self.lbl.select_rows(&row_indexes);
-
-        (fragment_img, fragment_lbl)
+    pub fn get_n_random_pairs(&self, n: usize) -> Vec<TinyPair> {
+        self.pairs.choose_multiple(&mut rand::thread_rng(), n).cloned().collect()
     }
 }
 
 pub struct TinyMNIST{
-    pub training: Set,
-    pub validation: Set,
-    pub test: Set
+    pub training: TinySet,
+    pub validation: TinySet,
+    pub test: TinySet
 }
 
-pub fn initialize_mnist() -> Mnist {
-    MnistBuilder::new()
-        .label_format_one_hot()
-        .training_set_length(settings::TRAINING_SIZE)
-        .validation_set_length(settings::VALIDATION_SIZE)
-        .test_set_length(settings::TEST_SIZE)
-        .finalize()
-}
-
-fn convert_img_to_matrix(v: Vec<u8>) -> Matrix<f32> {
-    //This works because v.len() is SET_SIZE * 28 * 28
-    let total_rows = v.len() / 28;
-    let unnormalized = Matrix::new(total_rows, 28, v);
-    //Divide all pixels by 255
-    let result: Matrix<f32> = unnormalized.try_into().unwrap() / 255.0;
-
-    result
-}
-
-pub fn tinify_mnist(mnist: Mnist) -> TinyMNIST {
-    //TODO: Not sure if this is needed (could just use a vec):
-    //Labels are one hot encoded, so we generate a matrix with just one column and lots of rows
-    TinyMNIST {
-        training: Set { 
-            img: convert_img_to_matrix(mnist.trn_img),
-            lbl: Matrix::new(mnist.trn_lbl.len(), 1, mnist.trn_lbl)
-        },
-        validation: Set {
-            img: convert_img_to_matrix(mnist.val_img),
-            lbl: Matrix::new(mnist.val_lbl.len(), 1, mnist.val_lbl)
-        },
-        test: Set {
-            img: convert_img_to_matrix(mnist.tst_img),
-            lbl: Matrix::new(mnist.tst_lbl.len(), 1, mnist.tst_lbl)
+impl TinyMNIST{
+    pub fn initialize() -> Self {
+        let mnist = MnistBuilder::new()
+            .label_format_digit()
+            .training_set_length(settings::TRAINING_SIZE)
+            .validation_set_length(settings::VALIDATION_SIZE)
+            .test_set_length(settings::TEST_SIZE)
+            .finalize();
+        TinyMNIST { 
+            training: TinySet::initialize(mnist.trn_img, mnist.trn_lbl),
+            validation: TinySet::initialize(mnist.val_img, mnist.val_lbl), 
+            test: TinySet::initialize(mnist.tst_img, mnist.tst_lbl) 
         }
     }
 }
-

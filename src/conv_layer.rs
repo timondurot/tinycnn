@@ -8,6 +8,15 @@ struct KernelVec {
     bias: Matrix<f32>
 }
 
+impl KernelVec {
+    pub fn new(channels: usize, kernelsidelength: usize, input_width: usize, input_height: usize) -> Self{
+        Self {
+            subkernels: (0..channels).map(|_| gen_rand_matrix(kernelsidelength, kernelsidelength)).collect(),
+            bias: gen_rand_matrix(input_height - kernelsidelength + 1, input_width - kernelsidelength + 1)
+        }
+    }
+}
+
 pub struct ConvolutionalLayer {
     //4d kernels: one dimension for each kernelvec, which in turn contains a subkernel (2d matrix) for every channel + 1 bias matrix
     kernels: Vec<KernelVec>,
@@ -15,29 +24,17 @@ pub struct ConvolutionalLayer {
 
 //#TODO: add generic types to support passing in other layers, passing in channels and input dimensions seems bloated
 impl ConvolutionalLayer {
-    pub fn new(channels: usize, kernelvecs: usize, kernelsidelength: usize, 
-               input_width: usize, input_height: usize) -> ConvolutionalLayer {
-        let mut kernels: Vec<KernelVec> = Vec::new();
-
-        for _ in 0..kernelvecs {
-            let mut subkernels: Vec<Matrix<f32>> = Vec::new();
-            //(0..channels).map()
-            for _ in 0..channels {
-                subkernels.push(gen_rand_matrix(kernelsidelength, kernelsidelength));
-            }
-            let bias = gen_rand_matrix(input_height - kernelsidelength + 1, input_width - kernelsidelength + 1);
-            kernels.push(KernelVec { subkernels, bias });
-        }
-
-        ConvolutionalLayer {
-            kernels
+    pub fn new(channels: usize, kernelcount: usize, kernelsidelength: usize, input_width: usize, input_height: usize) -> Self {
+        Self {
+            kernels: (0..kernelcount).map(|_| KernelVec::new(channels, kernelsidelength, input_width, input_height)).collect()
         }
     }
-    
-    //takes input image/featuremap with some amount of channels and outputs the convolution for each kernelvec and bias
-    //pub fn forward_pass(&self, input: &Vec<Matrix<f32>>) -> Vec<Matrix<f32>> {
 
-    //}
+    //takes input image/featuremap with some amount of channels and outputs the convolution for each kernelvec
+    //pub fn forward_pass(&self, input: &Vec<Matrix<f32>>) -> Vec<Matrix<f32>> {
+    pub fn forward_pass(&self, input: &Vec<Matrix<f32>>) {
+        println!("{}", input[0]);
+    }
 }
 
 //rows -> height, columns -> width
