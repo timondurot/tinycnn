@@ -1,27 +1,21 @@
-use rulinalg::matrix::{Matrix, BaseMatrixMut};
-use mnist_stuff::*;
-use conv_layer::*;
-
+use ndarray::prelude::*;
 mod settings;
-mod mnist_stuff;
+mod mnist_wrapper;
 mod conv_layer;
 fn main() {
-    let kerneldata = vec![1.0, 0.0, -1.0,
-                          1.0, 0.0, -1.0,
-                          1.0, 0.0, -1.0];
+    let kernel = array![[1., 0., -1.],
+                        [1., 0., -1.],
+                        [1., 2., -1.]];
 
-    let kernel = Matrix::new(3, 3, kerneldata);
-    
-    println!("{}", kernel);
+    println!("{:#1.0}", conv_layer::fullconvolve(kernel.view(), kernel.view()));
 
-    let mnist = TinyMNIST::initialize();
-    let imagesample: Vec<TinyPair> = mnist.training.get_n_random_pairs(50);
+    let mnist = mnist_wrapper::TinyMNIST::new();
+    let (images, labels) = mnist.training;
 
-    let img = imagesample[1].img.clone().apply(&|p| p.round());
-    println!("{}", img);
+    let threechannelimg = images.slice(s![0..3_usize, .., ..]);
+    println!("{:#1.0}\nlabels: {:?}", threechannelimg, labels.slice(s![0..3_usize, ..]));
 
-    let convolved_img = convolve(&img, &kernel).apply(&|p| p.round());
-    println!("{}", convolved_img);
-
-    println!("{:?}", imagesample[1].lbl);
+    let mut cl = conv_layer::ConvolutionalLayer::new([3, 28, 28], 1, 3);
+    let featuremaps = cl.forward_pass(threechannelimg.view()).map(|x| if x.round() == 0. {0} else {1});
+    println!("{:#1.0}", featuremaps);
 }

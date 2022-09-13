@@ -1,75 +1,102 @@
-use rand::Rng;
-use rulinalg::matrix::{Matrix, BaseMatrix};
-
-struct KernelVec {
-    //as many subkernels as the input has channels
-    subkernels: Vec<Matrix<f32>>,
-    //the bias matrix has the same shape as the output of the convolutional layer
-    bias: Matrix<f32>
-}
-
-impl KernelVec {
-    pub fn new(channels: usize, kernelsidelength: usize, input_width: usize, input_height: usize) -> Self{
-        Self {
-            subkernels: (0..channels).map(|_| gen_rand_matrix(kernelsidelength, kernelsidelength)).collect(),
-            bias: gen_rand_matrix(input_height - kernelsidelength + 1, input_width - kernelsidelength + 1)
-        }
-    }
-}
+use ndarray::{prelude::*, Zip};
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use crate::settings;
 
 pub struct ConvolutionalLayer {
-    //4d kernels: one dimension for each kernelvec, which in turn contains a subkernel (2d matrix) for every channel + 1 bias matrix
-    kernels: Vec<KernelVec>,
+    //depth (or channels, think rgb), height, width
+    inputshape: [usize; 3],
+    //depth=kernelcount (each kernel takes all input channels and outputs a featuremap), height, width
+    outputshape: [usize; 3],
+    //how many kernels there are (each kernel has a subkernel for each input channel)
+    kernelcount: usize,
+    //how many subkernels there are per kernel (=input channels)
+    subkernelcount: usize,
+    //is set when forward_pass is called
+    previnput: Array3<f32>,
+    //4d kernels: kernels[kernel_index][subkernel_index][row][col]
+    kernels: Array4<f32>,
+    //3d biases: matches outputshape
+    biases: Array3<f32>
 }
 
-//#TODO: add generic types to support passing in other layers, passing in channels and input dimensions seems bloated
+//#TODO: support passing in other layers
 impl ConvolutionalLayer {
-    pub fn new(channels: usize, kernelcount: usize, kernelsidelength: usize, input_width: usize, input_height: usize) -> Self {
+    pub fn new(inputshape: [usize; 3], kernelcount: usize, kernelsidelength: usize) -> Self {
+        let [input_depth, input_height, input_width] = inputshape;
+        let kernelsshape = [kernelcount, input_depth, kernelsidelength, kernelsidelength];
+        let outputshape = [kernelcount, input_height - kernelsidelength + 1, input_width - kernelsidelength + 1];
+
         Self {
-            kernels: (0..kernelcount).map(|_| KernelVec::new(channels, kernelsidelength, input_width, input_height)).collect()
+            inputshape,
+            kernelcount,
+            outputshape,
+            subkernelcount: input_depth,
+            previnput: Array3::zeros(inputshape),
+            kernels: Array4::random(kernelsshape, Uniform::new(-1., 1.)),
+            biases: Array3::random(outputshape, Uniform::new(-1., 1.))
         }
     }
 
-    //takes input image/featuremap with some amount of channels and outputs the convolution for each kernelvec
-    //pub fn forward_pass(&self, input: &Vec<Matrix<f32>>) -> Vec<Matrix<f32>> {
-    pub fn forward_pass(&self, input: &Vec<Matrix<f32>>) {
-        println!("{}", input[0]);
-    }
-}
-
-//rows -> height, columns -> width
-pub fn gen_rand_matrix(rows: usize, cols: usize) -> Matrix<f32> {
-    //next line generates a vec of size width*height with random floats from -1 to 1
-    let data: Vec<f32> = (0..rows*cols).map(|_| rand::thread_rng().gen_range(-1.0..1.0)).collect();
-    //returns 2d matrix
-    Matrix::new(rows, cols, data)
-}
-
-fn get_flipped_matrix_180(matrix: &Matrix<f32>) -> Matrix<f32> {
-    let mut newmatrix = matrix.clone();
-    newmatrix.mut_data().reverse();
-    newmatrix
-}
-
-pub fn convolve(image: &Matrix<f32>, kernel: &Matrix<f32>) -> Matrix<f32> {
-    let kernel_size = kernel.rows();
-    let mut row_slide = 0;
-    let mut col_slide = 0;
-
-    let flipped_kernel = get_flipped_matrix_180(kernel);
-    let mut featuredata: Vec<f32> = Vec::new();
-    //use sub_slice to cut out the part of the image that is under the kernel
-    while row_slide <= image.rows() - kernel_size {
-        while col_slide <= image.cols() - kernel_size {
-            let under_kernel_image = image.sub_slice([row_slide, col_slide], kernel_size, kernel_size).into_matrix();
-            //this multiplies the kernel with the underlying image elementwise, then sums up the result
-            let feature = under_kernel_image.elemul(&flipped_kernel).sum();
-            featuredata.push(feature);
-            col_slide += 1;
+    //accepts 3d array containing images
+    //outputs 3d array containing featuremaps
+    pub fn forward_pass(&mut self, input: ArrayView3<f32>) -> Array3<f32> {
+        assert_eq!(input.shape(), self.inputshape);
+        self.previnput.assign(&input);
+        //initialize all featuremaps with their respective biases
+        let mut featuremaps = self.biases.clone();
+        for kernel_index in 0..self.kernelcount{
+            //access the featuremap at depth=kernel_index
+            let mut fm = featuremaps.slice_mut(s![kernel_index, .., ..]);
+            //add channelwise (1 channel = 1 subkernel) correlations to fm
+            for subkernel_idx in 0..self.subkernelcount{
+                let image = input.slice(s![subkernel_idx, .., ..]);
+                let kernel = self.kernels.slice(s![kernel_index, subkernel_idx, .., ..]);
+                fm += &validcorrelate(image, kernel);
+            }
         }
-        col_slide = 0;
-        row_slide += 1;
+        featuremaps
     }
-    //convert featuredata to matrix
-    Matrix::new(image.rows() - kernel_size + 1, image.cols() - kernel_size + 1, featuredata)
+
+    pub fn backward_pass(&mut self, output_deriv: ArrayView3<f32>) -> Array3<f32>{
+        let mut kernels_deriv = Array::<f32, _>::zeros(self.kernels.raw_dim());
+        let mut input_deriv = Array::zeros(self.inputshape);
+
+        for kernel_index in 0..self.kernelcount{
+            for subkernel_idx in 0..self.subkernelcount{
+                //update kernels_deriv
+                let mut subkernel_deriv = kernels_deriv.slice_mut(s![kernel_index, subkernel_idx, .., ..]);
+                let image = self.previnput.slice(s![subkernel_idx, .., ..]);
+                let o_deriv = output_deriv.slice(s![kernel_index, .., ..]);
+                subkernel_deriv.assign(&validcorrelate(image, o_deriv));
+                //update input_deriv
+                let mut channel_deriv = input_deriv.slice_mut(s![subkernel_idx, .., ..]);
+                let subkernel = self.kernels.slice(s![kernel_index, subkernel_idx, .., ..]);
+                channel_deriv += &fullconvolve(o_deriv, subkernel);
+            }
+        }
+
+        self.kernels -= &(settings::LEARNING_RATE * kernels_deriv);
+        self.biases -= &(settings::LEARNING_RATE * &output_deriv);
+
+        input_deriv
+    }
+}
+
+pub fn validcorrelate(image: ArrayView2<f32>, kernel: ArrayView2<f32>) -> Array2<f32> {
+    Zip::from(image.windows(kernel.raw_dim())).map_collect(|window| {
+		(&window * &kernel).sum()
+	})
+}
+
+pub fn fullconvolve(image: ArrayView2<f32>, kernel: ArrayView2<f32>) -> Array2<f32> {
+    //pad on kernelsidelength - 1 on every side of image
+    let padamount = kernel.shape()[0] - 1;
+    let image_rows = image.shape()[0];
+    let image_cols = image.shape()[1];
+    let mut padded = Array2::zeros((image_rows + padamount * 2, image_cols + padamount * 2));
+    padded.slice_mut(s![padamount..(image_rows+padamount), padamount..(image_cols+padamount)]).assign(&image);
+    //flip the kernel
+    let mut flipped = kernel.clone();
+    flipped.invert_axis(Axis(0));
+    validcorrelate(padded.view(), flipped.slice(s![..,..;-1]).view())
 }
