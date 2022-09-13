@@ -19,7 +19,6 @@ pub struct ConvolutionalLayer {
     biases: Array3<f32>
 }
 
-//#TODO: support passing in other layers
 impl ConvolutionalLayer {
     pub fn new(inputshape: [usize; 3], kernelcount: usize, kernelsidelength: usize) -> Self {
         let [input_depth, input_height, input_width] = inputshape;
@@ -39,7 +38,7 @@ impl ConvolutionalLayer {
 
     //accepts 3d array containing images
     //outputs 3d array containing featuremaps
-    pub fn forward_pass(&mut self, input: ArrayView3<f32>) -> Array3<f32> {
+    pub fn forward_pass(&mut self, input: Array3<f32>) -> ArrayD<f32> {
         assert_eq!(input.shape(), self.inputshape);
         self.previnput.assign(&input);
         //initialize all featuremaps with their respective biases
@@ -54,10 +53,10 @@ impl ConvolutionalLayer {
                 fm += &validcorrelate(image, kernel);
             }
         }
-        featuremaps
+        featuremaps.into_dyn()
     }
 
-    pub fn backward_pass(&mut self, output_deriv: ArrayView3<f32>) -> Array3<f32>{
+    pub fn backward_pass(&mut self, output_deriv: Array3<f32>) -> ArrayD<f32>{
         let mut kernels_deriv = Array::<f32, _>::zeros(self.kernels.raw_dim());
         let mut input_deriv = Array::zeros(self.inputshape);
 
@@ -78,7 +77,7 @@ impl ConvolutionalLayer {
         self.kernels -= &(settings::LEARNING_RATE * kernels_deriv);
         self.biases -= &(settings::LEARNING_RATE * &output_deriv);
 
-        input_deriv
+        input_deriv.into_dyn()
     }
 }
 
