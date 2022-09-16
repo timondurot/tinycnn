@@ -1,28 +1,29 @@
 use ndarray::prelude::*;
+use super::Layer;
 
 pub struct SigmoidLayer {
-    //is set when forward_pass is called
-    previnput: ArrayD<f32>,
+    shape: Vec<usize>
 }
 
 impl SigmoidLayer {
-    pub fn new() -> Self {
-        Self {
-            previnput: ArrayD::zeros([1, 1, 1, 1, 1].as_ref())
-        }
-    }
-
-    pub fn forward_pass(&mut self, input: ArrayD<f32>) -> ArrayD<f32> {
-        self.previnput = input.clone();
-        input.map(|x| sigmoid(*x)).into_dyn()
-    }
-
-    pub fn backward_pass(&mut self, output_deriv: ArrayD<f32>) -> ArrayD<f32>{
-        let a: ArrayD<f32> = self.previnput.map(|x| sigmoid_derivative(*x));
-        (&output_deriv * &a).into_dyn()
+    pub fn new(shape: Vec<usize>) -> Self {
+        Self { shape }
     }
 }
 
+impl Layer for SigmoidLayer {
+    fn get_output_shape(&self) -> Vec<usize> { self.shape.clone() }
+
+    fn forward_pass(&self, input: &ArrayD<f32>) -> ArrayD<f32> {
+        input.map(|x| sigmoid(*x)).into_dyn()
+    }
+
+    fn backward_pass(&self, output_derivatives: &ArrayD<f32>, previnput: &ArrayD<f32>) -> (ArrayD<f32>, Vec<ArrayD<f32>>){
+        let a: ArrayD<f32> = previnput.map(|x| sigmoid_derivative(*x));
+        ((output_derivatives * a).into_dyn(), vec![])
+    }
+    fn apply_deltas(&mut self, _input: Vec<ArrayD<f32>>){}
+}
 
 fn sigmoid(x: f32) -> f32{
     1. / (1. + (-x).exp())
